@@ -2,8 +2,8 @@
 """Check which public RPC endpoints actually work, and which a browser can call.
 
 For every endpoint in chains.json (or a flat {label: url} file) this tries the probe that matches the chain's
-protocol (EVM eth_blockNumber, Solana getSlot, Starknet starknet_blockNumber,
-CometBFT status, Sui checkpoint), and only counts an endpoint as alive when it
+protocol (Stellar/Soroban getLatestLedger, EVM eth_blockNumber, Solana getSlot,
+Starknet starknet_blockNumber, CometBFT status, Sui checkpoint), and only counts an endpoint as alive when it
 returns a real head block/slot, not a JSON error. It then sends a CORS
 preflight like a browser would, because the BlocRA web app calls RPCs directly
 from the page.
@@ -26,6 +26,8 @@ ORIGIN = "https://blocra.app"
 TIMEOUT = 8
 
 PROBES = [
+    ("stellar", {"jsonrpc": "2.0", "id": 1, "method": "getLatestLedger"},
+     lambda r: int(r["sequence"])),
     ("evm", {"jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []},
      lambda r: int(r, 16)),
     ("solana", {"jsonrpc": "2.0", "id": 1, "method": "getSlot", "params": []},

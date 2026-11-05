@@ -1,4 +1,5 @@
 {
+  "stellar": {"name": "Stellar", "type": "stellar", "currency": "XLM", "explorer": "https://stellar.expert/explorer/public", "rpcs": ["https://mainnet.sorobanrpc.com", "https://soroban-rpc.mainnet.stellar.gateway.fm", "https://rpc.lightsail.network", "https://stellar.api.onfinality.io/public"], "horizon": ["https://horizon.stellar.org", "https://horizon.stellar.lobstr.co"]},
   "starknet": {"name": "Starknet", "type": "starknet", "currency": "ETH", "explorer": "https://voyager.online", "rpcs": ["https://starknet-rpc.publicnode.com", "https://starknet.api.onfinality.io/public", "https://api.zan.top/public/starknet-mainnet"]},
   "ethereum": {"name": "Ethereum", "type": "evm", "currency": "ETH", "explorer": "https://etherscan.io", "rpcs": ["https://ethereum-rpc.publicnode.com", "https://eth.drpc.org", "https://1rpc.io/eth", "https://rpc.flashbots.net"]},
   "base": {"name": "Base", "type": "evm", "currency": "ETH", "explorer": "https://basescan.org", "rpcs": ["https://mainnet.base.org", "https://base-rpc.publicnode.com"]},
