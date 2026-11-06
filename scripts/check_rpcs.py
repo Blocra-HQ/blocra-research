@@ -4,7 +4,9 @@
 For every endpoint in chains.json (or a flat {label: url} file) this tries the probe that matches the chain's
 protocol (Stellar/Soroban getLatestLedger, EVM eth_blockNumber, Solana getSlot,
 Starknet starknet_blockNumber, CometBFT status, Sui checkpoint), and only counts an endpoint as alive when it
-returns a real head block/slot, not a JSON error. It then sends a CORS
+returns a real head block/slot, not a JSON error, and only counts it as fresh
+when that head block is less than an hour old (a node, or a whole chain, that
+stopped producing blocks still answers with its last head). It then sends a CORS
 preflight like a browser would, because the BlocRA web app calls RPCs directly
 from the page.
 
@@ -16,6 +18,7 @@ Standard library only.
 """
 import argparse
 import concurrent.futures
+import datetime
 import json
 import time
 import urllib.error
@@ -24,6 +27,8 @@ from pathlib import Path
 
 ORIGIN = "https://blocra.app"
 TIMEOUT = 8
+# Same limit as the backend: an older head block means the node is not synced.
+STALE_AFTER_SECS = 3600
 
 PROBES = [
     ("stellar", {"jsonrpc": "2.0", "id": 1, "method": "getLatestLedger"},
@@ -73,9 +78,34 @@ def cors_ok(url):
         return False
 
 
+def iso_seconds(text):
+    """Unix seconds from an RFC 3339 time with any number of fractional digits."""
+    return datetime.datetime.strptime(text[:19], "%Y-%m-%dT%H:%M:%S").replace(
+        tzinfo=datetime.timezone.utc).timestamp()
+
+
+def head_time(url, protocol, head, probe_result):
+    """Unix time of the head block, or None when the protocol has no cheap way to get it."""
+    if protocol == "stellar":
+        return int(probe_result["closeTime"])
+    if protocol == "cometbft":
+        return iso_seconds(probe_result["sync_info"]["latest_block_time"])
+    if protocol == "evm":
+        data, _ = post(url, {"jsonrpc": "2.0", "id": 1, "method": "eth_getBlockByNumber", "params": ["latest", False]})
+        return int(data["result"]["timestamp"], 16)
+    if protocol == "starknet":
+        data, _ = post(url, {"jsonrpc": "2.0", "id": 1, "method": "starknet_getBlockWithTxHashes", "params": ["latest"]})
+        return int(data["result"]["timestamp"])
+    if protocol == "solana":
+        data, _ = post(url, {"jsonrpc": "2.0", "id": 1, "method": "getBlockTime", "params": [head]})
+        return int(data["result"])
+    return None
+
+
 def check(chain, url):
     result = {"chain": chain, "url": url, "alive": False, "protocol": None,
-              "head": None, "latency_ms": None, "browser_ok": False, "error": None}
+              "head": None, "head_age_s": None, "fresh": None, "latency_ms": None,
+              "browser_ok": False, "error": None}
     for protocol, payload, parse in PROBES:
         start = time.time()
         try:
@@ -94,6 +124,13 @@ def check(chain, url):
             continue
         result.update(alive=True, protocol=protocol, head=head, error=None,
                       latency_ms=round((time.time() - start) * 1000))
+        try:
+            when = head_time(url, protocol, head, data["result"])
+        except Exception:
+            when = None
+        if when is not None:
+            result["head_age_s"] = max(0, round(time.time() - when))
+            result["fresh"] = result["head_age_s"] <= STALE_AFTER_SECS
         break
     if result["alive"]:
         result["browser_ok"] = cors_ok(url)
@@ -120,13 +157,16 @@ def main():
     results.sort(key=lambda r: (not r["alive"], r["chain"].lower()))
 
     alive = [r for r in results if r["alive"]]
-    print(f"{len(alive)}/{len(results)} endpoints alive, "
+    stale = [r for r in alive if r["fresh"] is False]
+    print(f"{len(alive)}/{len(results)} endpoints alive, {len(stale)} of them stale, "
           f"{sum(r['browser_ok'] for r in alive)} callable from a browser\n")
     for r in results:
         if r["alive"]:
             cors = "browser ok" if r["browser_ok"] else "server only"
-            print(f"  OK   {r['chain']:22} {r['protocol']:9} head {r['head']:>12}  "
-                  f"{r['latency_ms']:>5} ms  {cors:11}  {r['url']}")
+            age = r["head_age_s"]
+            age_text = "age ?" if age is None else f"age {age // 86400}d" if age > 86400 else f"age {age}s"
+            print(f"  {'STALE' if r['fresh'] is False else 'OK   '} {r['chain']:22} {r['protocol']:9} "
+                  f"head {r['head']:>12}  {age_text:>9}  {r['latency_ms']:>5} ms  {cors:11}  {r['url']}")
     for r in results:
         if not r["alive"]:
             print(f"  DEAD {r['chain']:22} {r['error'] or 'no valid result':16} {r['url']}")
